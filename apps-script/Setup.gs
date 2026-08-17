@@ -41,3 +41,33 @@ function createInitialAdmin(username, password, name, email) {
 
   return { success:true, userId, username, roleId:'ROLE_ADMIN' };
 }
+
+/**
+ * One-time interactive Admin setup.
+ * Password is entered at runtime and is stored only as a SHA-256 hash.
+ * No password is written into source code.
+ */
+function setupInitialAdmin() {
+  const ui = SpreadsheetApp.getUi();
+
+  const namePrompt = ui.prompt('I-TRUST Admin Setup', 'Admin Name:', ui.ButtonSet.OK_CANCEL);
+  if (namePrompt.getSelectedButton() !== ui.Button.OK) return;
+
+  const usernamePrompt = ui.prompt('I-TRUST Admin Setup', 'Admin Username / Email:', ui.ButtonSet.OK_CANCEL);
+  if (usernamePrompt.getSelectedButton() !== ui.Button.OK) return;
+
+  const passwordPrompt = ui.prompt('I-TRUST Admin Setup', 'Admin Password:', ui.ButtonSet.OK_CANCEL);
+  if (passwordPrompt.getSelectedButton() !== ui.Button.OK) return;
+
+  const emailPrompt = ui.prompt('I-TRUST Admin Setup', 'Admin Email (optional):', ui.ButtonSet.OK_CANCEL);
+  if (emailPrompt.getSelectedButton() !== ui.Button.OK) return;
+
+  const result = createInitialAdmin(
+    usernamePrompt.getResponseText().trim(),
+    passwordPrompt.getResponseText(),
+    namePrompt.getResponseText().trim(),
+    emailPrompt.getResponseText().trim()
+  );
+
+  ui.alert(`Admin created successfully.\n\nUsername: ${result.username}\nRole: ADMIN`);
+}
