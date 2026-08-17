@@ -3,6 +3,7 @@ const SHEET_SCHEMAS = {
   Users: ['userId','name','username','email','passwordHash','roleId','status','createdAt','updatedAt','lastLoginAt'],
   Roles: ['roleId','roleName','description','status'],
   Permissions: ['permissionId','permissionKey','description','status'],
+  UserPermissions: ['userPermissionId','userId','permissionKey','granted','createdAt','updatedAt'],
   UserShops: ['userShopId','userId','shopId','isPrimary','status','createdAt'],
   Categories: ['categoryId','shopId','name','productType','status','createdAt','updatedAt'],
   Brands: ['brandId','shopId','name','status','createdAt','updatedAt'],
@@ -34,16 +35,13 @@ const SHEET_SCHEMAS = {
 
 function setupSchema() {
   const spreadsheet = SpreadsheetApp.openById(CONFIG.SPREADSHEET_ID);
-
   Object.entries(SHEET_SCHEMAS).forEach(([sheetName, headers]) => {
     let sheet = spreadsheet.getSheetByName(sheetName);
     if (!sheet) sheet = spreadsheet.insertSheet(sheetName);
-
     if (sheet.getLastRow() === 0) {
       sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
       sheet.setFrozenRows(1);
     }
   });
-
   return jsonResponse({ success: true, sheets: Object.keys(SHEET_SCHEMAS) });
 }
