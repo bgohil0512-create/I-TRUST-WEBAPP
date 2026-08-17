@@ -15,8 +15,7 @@ const PERMISSION_ENTITY_NAMES = {
 };
 
 function permissionFor_(entity, verb) { return `${PERMISSION_ENTITY_NAMES[entity] || String(entity).replace(/s$/, '').toUpperCase()}_${verb}`; }
-
-function doGet() { return jsonResponse({ success:true, service:'I-TRUST-WEBAPP API', version:'0.3.1' }); }
+function doGet() { return jsonResponse({ success:true, service:'I-TRUST-WEBAPP API', version:'0.4.0' }); }
 
 function doPost(e) {
   try {
@@ -30,6 +29,7 @@ function doPost(e) {
 
 function routeAction_(action, payload, session) {
   if (action === 'ME') return { user:sanitizeUser_(findById_('Users','userId',session.userId)), permissions:getEffectivePermissions_(session.userId), shops:getUserShops_(session.userId) };
+  if (action === 'DASHBOARD_SUMMARY') return getDashboardSummary_(session, payload.shopId || null);
   if (action === 'LIST') {
     requirePermission_(session,permissionFor_(payload.entity,'VIEW'));
     const shopId = SHOP_SCOPED_ENTITIES.has(payload.entity) ? requireShopAccess_(session,payload.shopId) : null;
