@@ -1,9 +1,36 @@
+const DEFAULT_ROLE_PERMISSIONS = {
+  ADMIN: ['*'],
+  MANAGER: [
+    'CATEGORY_VIEW','CATEGORY_CREATE','CATEGORY_EDIT',
+    'BRAND_VIEW','BRAND_CREATE','BRAND_EDIT',
+    'PRODUCT_VIEW','PRODUCT_CREATE','PRODUCT_EDIT',
+    'SUPPLIER_VIEW','SUPPLIER_CREATE','SUPPLIER_EDIT',
+    'CUSTOMER_VIEW','CUSTOMER_CREATE','CUSTOMER_EDIT',
+    'PURCHASE_VIEW','PURCHASE_CREATE',
+    'PURCHASE_RETURN_VIEW','PURCHASE_RETURN_CREATE',
+    'SALES_VIEW','SALES_CREATE',
+    'SALES_RETURN_VIEW','SALES_RETURN_CREATE',
+    'STOCK_VIEW','WARRANTY_VIEW','PAYMENT_VIEW','ACCOUNTING_VIEW',
+    'EXPENSE_VIEW','EXPENSE_CREATE','INVOICE_VIEW','SETTINGS_VIEW'
+  ],
+  USER: [
+    'PRODUCT_VIEW',
+    'SUPPLIER_VIEW',
+    'CUSTOMER_VIEW','CUSTOMER_CREATE',
+    'SALES_VIEW','SALES_CREATE',
+    'STOCK_VIEW','WARRANTY_VIEW',
+    'INVOICE_VIEW'
+  ]
+};
+
 function hashPassword_(password) {
-  const bytes = Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, password, Utilities.Charset.UTF_8);
+  if (!password) throw new Error('Password is required.');
+  const bytes = Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, String(password), Utilities.Charset.UTF_8);
   return bytes.map((byte) => (byte < 0 ? byte + 256 : byte).toString(16).padStart(2, '0')).join('');
 }
 
 function authenticate_(username, password) {
+  if (!username || !password) throw new Error('Username and password are required.');
   const users = queryRecords_('Users', (row) => String(row.username).toLowerCase() === String(username).toLowerCase());
   const user = users[0];
   if (!user || String(user.status).toUpperCase() !== 'ACTIVE' || user.passwordHash !== hashPassword_(password)) {
@@ -11,18 +38,11 @@ function authenticate_(username, password) {
   }
 
   const token = Utilities.getUuid();
-  CacheService.getScriptCache().put(`session:${token}`, JSON.stringify({
-    userId: user.userId,
-    roleId: user.roleId,
-    username: user.username,
-  }), 21600);
+  const now = new Date().toISOString();
+  CacheService.getScriptCache().put(`session:${token}`, JSON.stringify({ userId:user.userId, roleId:user.roleId, username:user.username }), 21600);
+  updateRecordById_('Users', 'userId', user.userId, { lastLoginAt: now, updatedAt: now });
 
-  return {
-    token,
-    user: sanitizeUser_(user),
-    permissions: getEffectivePermissions_(user.userId),
-    shops: getUserShops_(user.userId),
-  };
+  return { token, user:sanitizeUser_(user), permissions:getEffectivePermissions_(user.userId), shops:getUserShops_(user.userId) };
 }
 
 function requireSession_(token) {
@@ -32,19 +52,13 @@ function requireSession_(token) {
   return JSON.parse(raw);
 }
 
-function getUserById_(userId) {
-  return findById_('Users', 'userId', userId);
-}
+function getUserById_(userId) { return findById_('Users', 'userId', userId); }
 
 function getUserShops_(userId) {
-  return queryRecords_('UserShops', (row) =>
-    String(row.userId) === String(userId) && String(row.status).toUpperCase() === 'ACTIVE'
-  );
+  return queryRecords_('UserShops', (row) => String(row.userId) === String(userId) && String(row.status).toUpperCase() === 'ACTIVE');
 }
 
-function getUserShop_(userId, shopId) {
-  return getUserShops_(userId).find((row) => String(row.shopId) === String(shopId)) || null;
-}
+function getUserShop_(userId, shopId) { return getUserShops_(userId).find((row) => String(row.shopId) === String(shopId)) || null; }
 
 function getRoleName_(roleId) {
   const role = findById_('Roles', 'roleId', roleId);
@@ -54,29 +68,21 @@ function getRoleName_(roleId) {
 function getEffectivePermissions_(userId) {
   const user = getUserById_(userId);
   if (!user) throw new Error('User not found.');
-
   const roleName = getRoleName_(user.roleId);
-  const base = typeof DEFAULT_ROLE_PERMISSIONS !== 'undefined' ? (DEFAULT_ROLE_PERMISSIONS[roleName] || []) : [];
+  const base = DEFAULT_ROLE_PERMISSIONS[roleName] || [];
   if (base.includes('*')) return ['*'];
-
-  const overrides = queryRecords_('UserPermissions', (row) =>
-    String(row.userId) === String(userId) && String(row.granted).toLowerCase() === 'true'
-  ).map((row) => String(row.permissionKey));
-
+  const overrides = queryRecords_('UserPermissions', (row) => String(row.userId) === String(userId) && String(row.granted).toLowerCase() === 'true').map((row) => String(row.permissionKey));
   return [...new Set([...base, ...overrides])];
 }
 
 function requirePermission_(session, permission) {
   const permissions = getEffectivePermissions_(session.userId);
-  if (!permissions.includes('*') && !permissions.includes(permission)) {
-    throw new Error(`Permission denied: ${permission}`);
-  }
+  if (!permissions.includes('*') && !permissions.includes(permission)) throw new Error(`Permission denied: ${permission}`);
 }
 
 function requireShopAccess_(session, shopId) {
   const user = getUserById_(session.userId);
   if (!user || String(user.status).toUpperCase() !== 'ACTIVE') throw new Error('Unauthorized user.');
-
   const roleName = getRoleName_(user.roleId);
   if (roleName === 'ADMIN') return shopId || null;
   if (!shopId) throw new Error('shopId is required.');
@@ -85,6 +91,7 @@ function requireShopAccess_(session, shopId) {
 }
 
 function sanitizeUser_(user) {
+  if (!user) return null;
   const copy = { ...user };
   delete copy.passwordHash;
   return copy;
