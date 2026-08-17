@@ -15,7 +15,7 @@ const PERMISSION_ENTITY_NAMES = {
 };
 
 function permissionFor_(entity, verb) { return `${PERMISSION_ENTITY_NAMES[entity] || String(entity).replace(/s$/, '').toUpperCase()}_${verb}`; }
-function doGet() { return jsonResponse({ success:true, service:'I-TRUST-WEBAPP API', version:'0.4.0' }); }
+function doGet() { return jsonResponse({ success:true, service:'I-TRUST-WEBAPP API', version:'0.5.0' }); }
 
 function doPost(e) {
   try {
@@ -30,6 +30,7 @@ function doPost(e) {
 function routeAction_(action, payload, session) {
   if (action === 'ME') return { user:sanitizeUser_(findById_('Users','userId',session.userId)), permissions:getEffectivePermissions_(session.userId), shops:getUserShops_(session.userId) };
   if (action === 'DASHBOARD_SUMMARY') return getDashboardSummary_(session, payload.shopId || null);
+  if (action === 'SEARCH') return universalSearch_(session, String(payload.query || '').trim(), payload.shopId || null);
   if (action === 'LIST') {
     requirePermission_(session,permissionFor_(payload.entity,'VIEW'));
     const shopId = SHOP_SCOPED_ENTITIES.has(payload.entity) ? requireShopAccess_(session,payload.shopId) : null;
@@ -56,6 +57,31 @@ function routeAction_(action, payload, session) {
     if(SHOP_SCOPED_ENTITIES.has(payload.entity)) requireShopAccess_(session,current.shopId); return deleteRecord_(payload.entity,payload.idField,payload.id);
   }
   throw new Error(`Unknown action: ${action}`);
+}
+
+function universalSearch_(session, query, requestedShopId) {
+  if (!query) return { query:'', results:[] };
+  const term = query.toLowerCase();
+  const shopId = requestedShopId ? requireShopAccess_(session, requestedShopId) : (session.roleName === 'ADMIN' ? null : requireShopAccess_(session, null));
+  const specs = [
+    { entity:'Customers', idField:'customerId', label:'Customer', fields:['name','mobile','aadhaar','gam','address'] },
+    { entity:'Products', idField:'productId', label:'Product', fields:['productName','modelNumber','sku','supplierProductCode','color','storageVariant'] },
+    { entity:'IMEI', idField:'imeiId', label:'IMEI / Serial', fields:['imei1','imei2','serialNumber'] },
+    { entity:'Suppliers', idField:'supplierId', label:'Supplier', fields:['name','mobile','alternateMobile','email','cityGam'] },
+    { entity:'Sales', idField:'saleId', label:'Sale / Invoice', fields:['invoiceNumber','customerId','saleId'] },
+    { entity:'Purchases', idField:'purchaseId', label:'Purchase / Invoice', fields:['invoiceNumber','supplierId','purchaseId'] },
+  ];
+  const results = [];
+  specs.forEach((spec) => {
+    try {
+      requirePermission_(session, permissionFor_(spec.entity, 'VIEW'));
+      queryRecords_(spec.entity, (row) => {
+        if (shopId && String(row.shopId) !== String(shopId)) return false;
+        return spec.fields.some((field) => String(row[field] ?? '').toLowerCase().includes(term));
+      }).slice(0, 25).forEach((row) => results.push({ type:spec.label, entity:spec.entity, idField:spec.idField, id:row[spec.idField], record:row }));
+    } catch (_) {}
+  });
+  return { query, results:results.slice(0, 100) };
 }
 
 function jsonResponse(data){return ContentService.createTextOutput(JSON.stringify(data)).setMimeType(ContentService.MimeType.JSON);}
