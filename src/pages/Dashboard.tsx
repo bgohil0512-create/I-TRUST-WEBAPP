@@ -22,7 +22,15 @@ type DashboardSummary = {
 };
 
 function money(value: number) {
-  return new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(value || 0);
+  return new Intl.NumberFormat('en-IN', {
+    style: 'currency',
+    currency: 'INR',
+    maximumFractionDigits: 0,
+  }).format(value || 0);
+}
+
+function shopLabel(shop: Record<string, unknown>) {
+  return String(shop.shopName || shop.name || shop.shopId || 'Assigned Shop');
 }
 
 export default function Dashboard() {
@@ -31,27 +39,51 @@ export default function Dashboard() {
   const role = getRoleName() || 'USER';
   const shops = getAssignedShops();
   const isAdmin = role === 'ADMIN';
-  const assignedShop = shops[0];
+  const [selectedShopId, setSelectedShopId] = useState<string | undefined>(shops[0]?.shopId);
   const [summary, setSummary] = useState<DashboardSummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
-  const shopId = useMemo(() => (isAdmin ? undefined : assignedShop?.shopId), [isAdmin, assignedShop?.shopId]);
+  const activeShopId = useMemo(
+    () => (isAdmin ? undefined : selectedShopId),
+    [isAdmin, selectedShopId],
+  );
+
+  useEffect(() => {
+    if (!isAdmin && shops.length > 0 && !shops.some((shop) => shop.shopId === selectedShopId)) {
+      setSelectedShopId(shops[0].shopId);
+    }
+  }, [isAdmin, selectedShopId, shops]);
 
   useEffect(() => {
     let active = true;
+
     async function load() {
       setLoading(true);
       setError('');
-      const response = await apiRequest<DashboardSummary>('DASHBOARD_SUMMARY', shopId ? { shopId } : {});
+
+      const response = await apiRequest<DashboardSummary>(
+        'DASHBOARD_SUMMARY',
+        activeShopId ? { shopId: activeShopId } : {},
+      );
+
       if (!active) return;
-      if (response.success && response.data) setSummary(response.data);
-      else setError(response.error || 'Unable to load dashboard.');
+
+      if (response.success && response.data) {
+        setSummary(response.data);
+      } else {
+        setSummary(null);
+        setError(response.error || 'Unable to load dashboard.');
+      }
+
       setLoading(false);
     }
+
     load();
-    return () => { active = false; };
-  }, [shopId]);
+    return () => {
+      active = false;
+    };
+  }, [activeShopId]);
 
   function signOut() {
     logout();
@@ -78,10 +110,11 @@ export default function Dashboard() {
           <p className="eyebrow">I-TRUST WEBAPP</p>
           <h2>Dashboard</h2>
         </div>
+
         <div className="user-chip">
           <span>{session?.user.name || session?.user.username}</span>
           <strong>{role}</strong>
-          <button onClick={signOut}>Logout</button>
+          <button onClick={signOut} type="button">Logout</button>
         </div>
       </header>
 
@@ -92,15 +125,48 @@ export default function Dashboard() {
             <h1>{isAdmin ? 'Admin Dashboard' : `${role} Dashboard`}</h1>
             <p>
               {isAdmin
-                ? summary?.scope.global ? 'Global access across all shops.' : `Shop: ${summary?.scope.shopId || 'All Shops'}`
-                : assignedShop ? `Assigned Shop: ${String(assignedShop.shopId)}` : 'No shop has been assigned yet.'}
+                ? 'Global access across all shops.'
+                : shops.length === 0
+                  ? 'No shop has been assigned yet.'
+                  : 'Your dashboard is limited to the shop assigned by Admin.'}
             </p>
           </div>
-          <button className="primary-button small" onClick={() => navigate('/search')}>Universal Search</button>
+
+          <button className="primary-button small" onClick={() => navigate('/search')} type="button">
+            Universal Search
+          </button>
         </div>
 
-        {loading && <p>Loading live dashboard…</p>}
-        {error && <p role="alert">{error}</p>}
+        {!isAdmin && shops.length > 0 && (
+          <section className="shop-selector-card" aria-label="Assigned shop">
+            <div>
+              <span className="section-kicker">ASSIGNED SHOP</span>
+              <strong>{shops.length === 1 ? shopLabel(shops[0] as unknown as Record<string, unknown>) : 'Select Shop'}</strong>
+            </div>
+
+            <select
+              value={selectedShopId || ''}
+              onChange={(event) => setSelectedShopId(event.target.value || undefined)}
+              aria-label="Select assigned shop"
+              disabled={shops.length === 1}
+            >
+              {shops.map((shop) => (
+                <option key={shop.shopId} value={shop.shopId}>
+                  {shopLabel(shop as unknown as Record<string, unknown>)}
+                </option>
+              ))}
+            </select>
+          </section>
+        )}
+
+        {loading && <p className="status-text">Loading live dashboard…</p>}
+        {error && <p className="error-inline" role="alert">{error}</p>}
+
+        {!loading && !error && summary && (
+          <p className="status-text dashboard-meta">
+            Data for {summary.date} • Updated {new Date(summary.meta.generatedAt).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}
+          </p>
+        )}
 
         <div className="metric-grid">
           {cards.map(([label, value]) => (
@@ -111,14 +177,20 @@ export default function Dashboard() {
           ))}
         </div>
 
-        <div className="quick-grid">
-          <button>New Sale</button>
-          <button>New Purchase</button>
-          <button>Customer Payment</button>
-          <button>Supplier Payment</button>
-          <button>Expense</button>
-          <button>Products</button>
-        </div>
+        <section className="quick-section">
+          <div>
+            <span className="section-kicker">QUICK ACTIONS</span>
+            <h3>Business shortcuts</h3>
+          </div>
+          <div className="quick-grid">
+            <button type="button">New Sale</button>
+            <button type="button">New Purchase</button>
+            <button type="button">Customer Payment</button>
+            <button type="button">Supplier Payment</button>
+            <button type="button">Expense</button>
+            <button type="button">Products</button>
+          </div>
+        </section>
       </section>
     </main>
   );
