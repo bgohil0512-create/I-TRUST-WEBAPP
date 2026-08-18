@@ -14,6 +14,9 @@ export type AssignedShop = {
   userId: string;
   shopId: string;
   status: string;
+  isPrimary?: boolean | string;
+  shopName?: string;
+  name?: string;
   [key: string]: unknown;
 };
 
@@ -67,5 +70,10 @@ export function hasPermission(permission: string): boolean {
 }
 
 export function getAssignedShops(): AssignedShop[] {
-  return getSession()?.shops || [];
+  const shops = [...(getSession()?.shops || [])];
+  return shops.sort((a, b) => Number(Boolean(b.isPrimary)) - Number(Boolean(a.isPrimary)));
+}
+
+export function getPrimaryShop(): AssignedShop | null {
+  return getAssignedShops()[0] || null;
 }
