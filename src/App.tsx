@@ -4,6 +4,7 @@ import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
 import Search from './pages/Search';
 import Products from './pages/Products';
+import Admin from './pages/Admin';
 import { getSession } from './lib/auth';
 
 function FoundationRedirect() {
@@ -19,6 +20,7 @@ export default function App() {
         <Route path="/dashboard" element={<Dashboard />} />
         <Route path="/search" element={<Search />} />
         <Route path="/products" element={<Products />} />
+        <Route path="/admin" element={<Admin />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
