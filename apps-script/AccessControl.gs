@@ -1,15 +1,3 @@
-const DEFAULT_ROLE_PERMISSIONS = {
-  ADMIN: ['*'],
-  MANAGER: [
-    'DASHBOARD_VIEW', 'PRODUCT_VIEW', 'PRODUCT_CREATE', 'PRODUCT_EDIT',
-    'PURCHASE_VIEW', 'PURCHASE_CREATE', 'PURCHASE_RETURN',
-    'SALES_VIEW', 'SALES_CREATE', 'SALES_RETURN',
-    'CUSTOMER_VIEW', 'CUSTOMER_EDIT', 'SUPPLIER_VIEW', 'SUPPLIER_EDIT',
-    'REPORT_VIEW', 'PROFIT_VIEW', 'ACCOUNTING_VIEW'
-  ],
-  USER: ['DASHBOARD_VIEW', 'PRODUCT_VIEW', 'SALES_VIEW', 'SALES_CREATE', 'CUSTOMER_VIEW']
-};
-
 function getRoleName_(roleId) {
   const role = findById_('Roles', 'roleId', roleId);
   return normalizeRole_(role ? role.roleName : roleId);
