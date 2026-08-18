@@ -15,7 +15,7 @@ const PERMISSION_ENTITY_NAMES = {
 };
 
 function permissionFor_(entity, verb) { return `${PERMISSION_ENTITY_NAMES[entity] || String(entity).replace(/s$/, '').toUpperCase()}_${verb}`; }
-function doGet() { return jsonResponse({ success:true, service:'I-TRUST-WEBAPP API', version:'0.5.0' }); }
+function doGet() { return jsonResponse({ success:true, service:'I-TRUST-WEBAPP API', version:'0.6.0' }); }
 
 function doPost(e) {
   try {
@@ -31,6 +31,9 @@ function routeAction_(action, payload, session) {
   if (action === 'ME') return { user:sanitizeUser_(findById_('Users','userId',session.userId)), permissions:getEffectivePermissions_(session.userId), shops:getUserShops_(session.userId) };
   if (action === 'DASHBOARD_SUMMARY') return getDashboardSummary_(session, payload.shopId || null);
   if (action === 'SEARCH') return universalSearch_(session, String(payload.query || '').trim(), payload.shopId || null);
+  if (action === 'ADMIN_OVERVIEW') return adminOverview_(session);
+  if (action === 'ADMIN_SAVE_SHOP') return adminSaveShop_(session, payload.shop || {});
+  if (action === 'ADMIN_SAVE_USER') return adminSaveUser_(session, payload.user || {});
   if (action === 'LIST') {
     requirePermission_(session,permissionFor_(payload.entity,'VIEW'));
     const shopId = SHOP_SCOPED_ENTITIES.has(payload.entity) ? requireShopAccess_(session,payload.shopId) : null;
@@ -57,6 +60,85 @@ function routeAction_(action, payload, session) {
     if(SHOP_SCOPED_ENTITIES.has(payload.entity)) requireShopAccess_(session,current.shopId); return deleteRecord_(payload.entity,payload.idField,payload.id);
   }
   throw new Error(`Unknown action: ${action}`);
+}
+
+function adminOverview_(session) {
+  requireAdmin_(session);
+  const shops = queryRecords_('Shops');
+  const users = queryRecords_('Users').map((user) => {
+    const assignments = getUserShops_(user.userId);
+    const primary = assignments.find((row) => String(row.isPrimary).toLowerCase() === 'true');
+    return { ...sanitizeUser_(user), shopIds:assignments.map((row) => String(row.shopId)), primaryShopId:primary ? String(primary.shopId) : '' };
+  });
+  const roles = queryRecords_('Roles', row => String(row.status).toUpperCase() === 'ACTIVE').map((row) => ({ roleId:row.roleId, roleName:row.roleName, description:row.description }));
+  return { shops, users, roles };
+}
+
+function requireAdmin_(session) {
+  const user = getUserById_(session.userId);
+  if (!user || String(user.status).toUpperCase() !== 'ACTIVE' || getRoleName_(user.roleId) !== 'ADMIN') throw new Error('Admin access required.');
+}
+
+function adminSaveShop_(session, input) {
+  requireAdmin_(session);
+  const shopId = String(input.shopId || '').trim();
+  const shopName = String(input.shopName || '').trim();
+  if (!shopId || !shopName) throw new Error('shopId and shopName are required.');
+  const now = new Date().toISOString();
+  const existing = findById_('Shops','shopId',shopId);
+  const record = {
+    shopId, shopName, logoUrl:String(input.logoUrl || ''), address:String(input.address || ''), mobile1:String(input.mobile1 || ''), mobile2:String(input.mobile2 || ''),
+    email:String(input.email || ''), website:String(input.website || ''), city:String(input.city || ''), state:String(input.state || ''), pincode:String(input.pincode || ''),
+    tagline:String(input.tagline || ''), status:String(input.status || 'ACTIVE').toUpperCase(), createdAt:existing?.createdAt || now, updatedAt:now
+  };
+  if (existing) return updateRecordById_('Shops','shopId',shopId,record);
+  return createRecord_('Shops',record);
+}
+
+function adminSaveUser_(session, input) {
+  requireAdmin_(session);
+  const userId = String(input.userId || '').trim();
+  const name = String(input.name || '').trim();
+  const username = String(input.username || '').trim();
+  const roleId = String(input.roleId || '').trim();
+  if (!userId || !name || !username || !roleId) throw new Error('userId, name, username and roleId are required.');
+  if (!findById_('Roles','roleId',roleId)) throw new Error('Selected role does not exist.');
+
+  const duplicates = queryRecords_('Users', row => String(row.username).toLowerCase() === username.toLowerCase() && String(row.userId) !== userId);
+  if (duplicates.length) throw new Error('Username already exists.');
+
+  const now = new Date().toISOString();
+  const existing = findById_('Users','userId',userId);
+  if (!existing && !String(input.password || '')) throw new Error('Password is required for a new user.');
+
+  const record = {
+    userId, name, username, email:String(input.email || ''), passwordHash:existing?.passwordHash || '', roleId,
+    status:String(input.status || 'ACTIVE').toUpperCase(), createdAt:existing?.createdAt || now, updatedAt:now, lastLoginAt:existing?.lastLoginAt || ''
+  };
+  if (String(input.password || '')) record.passwordHash = hashPassword_(String(input.password));
+  if (existing) updateRecordById_('Users','userId',userId,record); else createRecord_('Users',record);
+
+  syncUserShops_(userId, Array.isArray(input.shopIds) ? input.shopIds : [], String(input.primaryShopId || ''));
+  return sanitizeUser_(findById_('Users','userId',userId));
+}
+
+function syncUserShops_(userId, shopIds, primaryShopId) {
+  const requested = [...new Set(shopIds.map(String).filter(Boolean))];
+  requested.forEach((shopId) => { if (!findById_('Shops','shopId',shopId)) throw new Error(`Shop not found: ${shopId}`); });
+  if (primaryShopId && !requested.includes(primaryShopId)) throw new Error('Primary shop must be one of the assigned shops.');
+  const existing = queryRecords_('UserShops', row => String(row.userId) === userId);
+  const existingByShop = new Map(existing.map((row) => [String(row.shopId), row]));
+  const now = new Date().toISOString();
+
+  existing.forEach((row) => {
+    const shopId = String(row.shopId);
+    if (!requested.includes(shopId)) updateRecordById_('UserShops','userShopId',row.userShopId,{ status:'INACTIVE', updatedAt:now });
+    else updateRecordById_('UserShops','userShopId',row.userShopId,{ status:'ACTIVE', isPrimary:shopId === primaryShopId, updatedAt:now });
+  });
+
+  requested.forEach((shopId) => {
+    if (!existingByShop.has(shopId)) appendRecord_('UserShops', { userShopId:`USER_SHOP_${Utilities.getUuid()}`, userId, shopId, isPrimary:shopId === primaryShopId, status:'ACTIVE', createdAt:now });
+  });
 }
 
 function universalSearch_(session, query, requestedShopId) {
